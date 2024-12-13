@@ -1,0 +1,7 @@
+pipecat-ai[daily,elevenlabs,openai,silero,google]
+fastapi
+uvicorn
+python-dotenv
+twilio
+python-multipart
+aiohttp
