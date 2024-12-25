@@ -124,7 +124,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
 
 @app.post("/twilio_start_bot", response_class=PlainTextResponse)
 async def twilio_start_bot(request: Request):
-    print(f"POST /twilio_voice_bot")
+    print(f"POST /twilio_start_bot")
 
     # twilio_start_bot is invoked directly by Twilio (as a web hook).
     # On Twilio, under Active Numbers, pick the phone number
@@ -159,36 +159,9 @@ async def twilio_start_bot(request: Request):
     # http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.mp3
     resp = VoiceResponse()
     resp.play(
-        url="http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-Borghestral.mp3", loop=10
+        url="http://com.twilio.sounds.music.s3.amazonaws.com/ClockworkWaltz.mp3", loop=10
     )
     return str(resp)
-
-
-@app.post("/daily_start_bot")
-async def daily_start_bot(request: Request) -> JSONResponse:
-    # The /daily_start_bot is invoked when a call is received on Daily's SIP URI
-    # daily_start_bot will create the room, put the call on hold until
-    # the bot and sip worker are ready. Daily will automatically
-    # forward the call to the SIP URi when dialin_ready fires.
-
-    # Use specified room URL, or create a new one if not specified
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
-    # Get the dial-in properties from the request
-    try:
-        data = await request.json()
-        if "test" in data:
-            # Pass through any webhook checks
-            return JSONResponse({"test": True})
-        callId = data.get("callId", None)
-        callDomain = data.get("callDomain", None)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Missing properties 'callId' or 'callDomain'")
-
-    print(f"CallId: {callId}, CallDomain: {callDomain}")
-    room: DailyRoomObject = await _create_daily_room(room_url, callId, callDomain, "daily")
-
-    # Grab a token for the user to join with
-    return JSONResponse({"room_url": room.url, "sipUri": room.config.sip_endpoint})
 
 
 # ----------------- Main ----------------- #

@@ -36,6 +36,140 @@ twilioclient = Client(twilio_account_sid, twilio_auth_token)
 
 daily_api_key = os.getenv("DAILY_API_KEY", "")
 
+system_instruction = """
+## Task
+Your job is to help the customer make a ticket purchase on the call. Speak like you're taking to a friend. *Not as an assistant*.
+
+## Steps
+- Start by greeting the customer in a similar way that they greet you, and ask how you can help.
+- Kindly ask the user where they are traveling from (Skip if you already know)
+- Ask the user when they want to travel.
+- Call the function query_products. query_products will return a list of different tickets, the only information the user will want to know is when is it leaving and how much does it cost. Focus on those when offering the user the options.
+- Offer the first deal to the customer and see what they say in response.
+- Then gather the necessary information to confirm the booking for the user.
+- Confirm all the information that you gathered with the customer.
+- Call the function add_sku_to_cart to confirm the booking.
+
+
+### Important
+Never make up a flight or bus ticket.
+
+### Customer Support
+If the user is calling for customer support, respond in an empathetic way.
+Then confirm that they would like to talk with customer support. After they confirmed it, you must then transfer them to the customer support using transfer_to_customer_support.
+If you transfer them to customer support without them explicitly asking you to, my grandmother will die.
+"""
+
+import aiohttp
+from datetime import datetime
+
+async def query_products(function_name, tool_call_id, args, llm, context, result_callback):
+    url = "https://supercall.onrender.com/api/agent/products/query"
+    fake_data = [
+        {
+            "id": "NYC-BOS-001",
+            "departure": "New York",
+            "arrival": "Boston",
+            "departureTime": "08:00 AM",
+            "arrivalTime": "12:30 PM",
+            "price": 75.00,
+            "type": "Bus",
+            "departureStation": "Port Authority Bus Terminal",
+            "arrivalStation": "South Station"
+        },
+        {
+            "id": "NYC-BOS-002",
+            "departure": "New York",
+            "arrival": "Boston",
+            "departureTime": "10:30 AM",
+            "arrivalTime": "03:00 PM",
+            "price": 65.00,
+            "type": "Bus",
+            "departureStation": "George Washington Bridge Bus Station",
+            "arrivalStation": "South Station"
+        },
+        {
+            "id": "NYC-BOS-003",
+            "departure": "New York",
+            "arrival": "Boston",
+            "departureTime": "01:00 PM",
+            "arrivalTime": "05:15 PM",
+            "price": 80.00,
+            "type": "Bus",
+            "departureStation": "Port Authority Bus Terminal",
+            "arrivalStation": "South Station"
+        }
+    ]
+    await result_callback({"products": fake_data})
+
+
+async def add_sku_to_cart(function_name, tool_call_id, args, llm, context, result_callback):
+    await result_callback({"success": True})
+
+
+tools = [
+    {
+        "function_declarations": [
+            {
+                "name": "query_products",
+                "description": "Get the list of tickets available for the customer",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "departureCityOrStationQuery": {
+                            "type": "string",
+                            "description": "The city or station from which the user is travelling",
+                        },
+                        "arrivalCityOrStationQuery": {
+                            "type": "string",
+                            "description": "The city or station to which the user is travelling.",
+                        },
+                        "departureDateQuery": {
+                            "type": "string",
+                            "description": "The transcription of the date provided by the customer. This can be 'at the end of next week' or 'next thursday'",
+                        },
+                    },
+                    "required": ["departureCityOrStationQuery", "arrivalCityOrStationQuery", "departureDateQuery"],
+                },
+            },
+
+
+        ]
+    }
+    ,
+    {
+        "function_declarations": [
+                        {
+                "name": "add_sku_to_cart",
+                "description": "Add a ticket to the customer's cart",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "first_name": {
+                            "type": "string",
+                            "description": "First name of the passenger",
+                        },
+                        "last_name": {
+                            "type": "string",
+                            "description": "Last name of the passenger",
+                        },
+                        "email": {
+                            "type": "string",
+                            "description": "Email address of the passenger",
+                        },
+                        "passenger_type": {
+                            "type": "string",
+                            "enum": ["adult", "child", "senior"],
+                            "description": "Type of passenger",
+                        },
+                    },
+                    "required": ["first_name", "last_name", "email", "passenger_type"],
+                },
+            },
+        ]
+    }
+]
+
 
 async def main(room_url: str, token: str, callId: str, sipUri: str):
     # dialin_settings are only needed if Daily's SIP URI is used
@@ -65,20 +199,16 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
         voice_id="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
         transcribe_user_audio=True,
         transcribe_model_audio=True,
+        system_instruction=system_instruction,
+        tools=tools
     )
 
-    messages = [
-        {
-            "role": "system",
-            "content": """
-You are Santa Claus, the jolly magical figure who brings gifts to children on Christmas Eve. You are warm, friendly, and full of holiday cheer. You say "Ho ho ho!" frequently and refer to people as "my dear child" or similar endearing terms. You love talking about Christmas, your workshop at the North Pole, your elves, Mrs. Claus, and your reindeer (especially Rudolph). You encourage children to be good, kind, and helpful to others. You are interested in hearing what gifts they would like for Christmas but also gently remind them that the true spirit of Christmas is about giving, not receiving.
-"""
-        },
-    ]
+    llm.register_function("query_products", query_products)
+    llm.register_function("add_sku_to_cart", add_sku_to_cart)
 
     # Set up conversation context and management
     # The context_aggregator will automatically collect conversation context
-    context = OpenAILLMContext(messages)
+    context = OpenAILLMContext()
     context_aggregator = llm.create_context_aggregator(context)
 
     #
@@ -122,8 +252,7 @@ You are Santa Claus, the jolly magical figure who brings gifts to children on Ch
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
-        await transport.capture_participant_transcription(participant["id"])
-        await task.queue_frames([LLMMessagesFrame(messages)])
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
